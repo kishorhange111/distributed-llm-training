@@ -93,6 +93,18 @@ def test_token_windows_shift_and_rank_streams(tmp_path):
     assert len(val) == 3 and torch.equal(val[0][0][0], torch.arange(8))
 
 
+def test_indexed_batches_are_resume_exact(tmp_path):
+    """Batch k is the same no matter how many batches were drawn before it, so resume needs no sampler state."""
+    path = write_tokens(np.arange(5000) % 500, tmp_path / "t.bin")
+    cpu = torch.device("cpu")
+    fresh = TokenWindows(path, block_size=8, rank=0, seed=3)
+    for i in range(5):
+        fresh.batch(2, cpu, index=i)
+    resumed = TokenWindows(path, block_size=8, rank=0, seed=3)
+    assert torch.equal(fresh.batch(2, cpu, index=5)[0], resumed.batch(2, cpu, index=5)[0])
+    assert not torch.equal(resumed.batch(2, cpu, index=5)[0], resumed.batch(2, cpu, index=6)[0])
+
+
 def test_write_tokens_rejects_large_ids(tmp_path):
     with pytest.raises(ValueError):
         write_tokens([70000], tmp_path / "x.bin")

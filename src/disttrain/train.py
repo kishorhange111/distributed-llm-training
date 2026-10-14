@@ -186,9 +186,9 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
     else:
         train_data, val_data = None, None
 
-    def next_batch():
+    def next_batch(index: int):
         if train_data is not None:
-            return train_data.batch(cfg.micro_batch_size, info.device)
+            return train_data.batch(cfg.micro_batch_size, info.device, index)
         x = torch.randint(0, mcfg.vocab_size, (cfg.micro_batch_size, cfg.block_size + 1), device=info.device)
         return x[:, :-1], x[:, 1:]
 
@@ -224,7 +224,7 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
             last = micro == cfg.grad_accum - 1
             if cfg.strategy == "fsdp" and last:
                 wrapped.set_requires_gradient_sync(True)  # re-enable sync for the final micro-batch
-            x, y = next_batch()
+            x, y = next_batch(step * cfg.grad_accum + micro)
             with no_grad_sync(wrapped, cfg.strategy, enabled=not last), autocast():
                 _, loss = model(x, y)
                 # Divide so the accumulated gradient equals the gradient of the *mean* loss over the global batch.

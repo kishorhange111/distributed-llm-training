@@ -35,16 +35,24 @@ class TokenWindows:
         if len(self.tokens) <= block_size + 1:
             raise ValueError(f"{path} has {len(self.tokens)} tokens, need more than block_size + 1 = {block_size + 1}")
         self.block_size = block_size
+        self.seed, self.rank = seed, rank
         # Different seed per rank, so no two ranks train on the same windows in the same step.
-        self.rng = np.random.default_rng(seed * 1000 + rank)
+        self.rng = np.random.default_rng([seed, rank])
         self.world_size = world_size
 
     def __len__(self) -> int:
         return len(self.tokens)
 
-    def batch(self, batch_size: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        """Sample ``batch_size`` windows and move them to ``device``."""
-        starts = self.rng.integers(0, len(self.tokens) - self.block_size - 1, size=batch_size)
+    def batch(self, batch_size: int, device: torch.device, index: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample ``batch_size`` windows and move them to ``device``.
+
+        With ``index`` (the global micro-batch number) the windows depend only on
+        (seed, rank, index), not on how many batches came before. That makes
+        resume-from-checkpoint exact without saving any sampler state: step
+        1000 draws the same data whether the run was interrupted or not.
+        """
+        rng = np.random.default_rng([self.seed, self.rank, index]) if index is not None else self.rng
+        starts = rng.integers(0, len(self.tokens) - self.block_size - 1, size=batch_size)
         # int64 because embedding lookups and cross-entropy need long indices.
         x = np.stack([self.tokens[s : s + self.block_size] for s in starts]).astype(np.int64)
         y = np.stack([self.tokens[s + 1 : s + 1 + self.block_size] for s in starts]).astype(np.int64)
