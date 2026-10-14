@@ -1,0 +1,24 @@
+# GPT-2 small (124M) pre-trained from scratch on ~1B tokens of FineWeb-Edu.
+# Global batch = 32 seq x 1024 tokens x 16 accumulation = 524,288 tokens (0.5M, as in GPT-3 small).
+# 2,000 steps x 0.5M = 1.05B tokens. Works unchanged with torchrun on N GPUs:
+# set grad_accum to 16 / N to keep the same global batch.
+preset: gpt2-small
+block_size: 1024
+strategy: single
+train_data: data/fineweb/train.bin
+val_data: data/fineweb/val.bin
+micro_batch_size: 32
+grad_accum: 16
+max_steps: 2000
+lr: 0.0018          # higher than GPT-2's 6e-4: small models trained briefly tolerate (and need) a larger LR
+min_lr: 0.00018
+warmup_steps: 100
+weight_decay: 0.1
+dtype: bfloat16
+compile: true
+eval_interval: 200
+eval_batches: 40
+log_interval: 10
+out_dir: runs/gpt2_small_fineweb
+ckpt_interval: 250
+time_budget_minutes: 170   # hard stop (with a checkpoint) to cap Colab spend

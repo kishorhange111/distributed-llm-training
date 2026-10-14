@@ -1,0 +1,9 @@
+# One-minute check that the full loop works on the current machine (synthetic data).
+preset: tiny
+block_size: 64
+micro_batch_size: 8
+max_steps: 30
+warmup_steps: 5
+dtype: float32
+log_interval: 5
+out_dir: runs/smoke
