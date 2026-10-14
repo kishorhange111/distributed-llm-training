@@ -10,11 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Kishor Hange" }]
-dependencies = ["torch>=2.6", "numpy>=1.24", "pyyaml>=6.0"]
+dependencies = ["torch>=2.6,<3", "numpy>=1.24,<3", "pyyaml>=6.0,<7"]
 
 [project.optional-dependencies]
-data = ["datasets>=2.18", "tiktoken>=0.7", "transformers>=4.45"]
-dev = ["pytest>=8", "ruff>=0.6", "transformers>=4.45"]
+data = ["datasets>=2.18,<5", "tiktoken>=0.7,<1", "transformers>=4.45,<6"]
+dev = ["pytest>=8", "ruff>=0.6", "transformers>=4.45,<6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
