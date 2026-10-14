@@ -71,9 +71,11 @@ def cleanup() -> None:
 def seed_everything(seed: int, rank: int = 0) -> None:
     """Seed all RNGs. Each rank gets ``seed + rank`` so data sampling and dropout differ across ranks.
 
-    Model *initialisation* must be identical on every rank, which is why
-    :func:`disttrain.strategies.wrap_model` broadcasts (DDP) or shards (FSDP)
-    the parameters from rank 0 instead of relying on equal seeds.
+    Model *initialisation* must be identical on every rank. The training script
+    re-seeds with the *same* seed just before building the model (and re-applies
+    the per-rank seed afterwards). DDP additionally broadcasts rank 0's weights;
+    FSDP2's ``fully_shard`` does not broadcast, each rank keeps its slice of the
+    weights it initialised itself, so equal seeds are what make the shards agree.
     """
     random.seed(seed + rank)
     np.random.seed(seed + rank)
@@ -87,6 +89,15 @@ def all_reduce_mean(value: float | torch.Tensor, info: DistInfo) -> float:
         dist.all_reduce(t, op=dist.ReduceOp.SUM)
         t /= info.world_size
     return float(t)
+
+
+def stop_decision(local: bool, info: DistInfo) -> bool:
+    """Rank 0's yes/no, broadcast to all ranks, so every rank leaves the training loop at the same step."""
+    if info.world_size == 1:
+        return local
+    t = torch.tensor([1 if local else 0], device=info.device)
+    dist.broadcast(t, src=0)
+    return bool(t.item())
 
 
 def barrier(info: DistInfo) -> None:

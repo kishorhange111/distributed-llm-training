@@ -36,7 +36,7 @@ import yaml
 
 from disttrain import checkpoint
 from disttrain.data import TokenWindows
-from disttrain.distributed import DistInfo, all_reduce_mean, barrier, cleanup, seed_everything, setup
+from disttrain.distributed import DistInfo, all_reduce_mean, barrier, cleanup, seed_everything, setup, stop_decision
 from disttrain.metrics import ThroughputMeter, flops_per_token, peak_flops
 from disttrain.model import build_model
 from disttrain.strategies import clip_grad_norm, wrap_model
@@ -155,6 +155,7 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
     # ---- model: seed identically on every rank so FSDP shards come from the same init
     torch.manual_seed(cfg.seed)
     model = build_model(cfg.preset, block_size=cfg.block_size, activation_checkpointing=cfg.activation_checkpointing)
+    torch.manual_seed(cfg.seed + info.rank)  # back to per-rank streams (dropout, random-token fallback data)
     n_params = model.num_params()
     mcfg = model.cfg
     model = wrap_model(
@@ -260,7 +261,9 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
                     f.write(json.dumps(record) + "\n")
 
         # ---- checkpointing and time budget
-        out_of_time = cfg.time_budget_minutes and (time.time() - t0) / 60 > cfg.time_budget_minutes
+        # Every rank must stop at the same step, or the others hang in the next collective.
+        # Rank clocks drift apart slightly, so rank 0 decides and broadcasts the decision.
+        out_of_time = bool(cfg.time_budget_minutes) and stop_decision((time.time() - t0) / 60 > cfg.time_budget_minutes, info)
         if cfg.ckpt_interval and (step % cfg.ckpt_interval == 0 or out_of_time or step == cfg.max_steps - 1) and step > start_step:
             checkpoint.save(out / "checkpoints", wrapped, optimizer, step, {"preset": cfg.preset}, info.is_main)
         if out_of_time:
