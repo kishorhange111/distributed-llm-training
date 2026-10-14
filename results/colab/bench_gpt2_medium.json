@@ -1,0 +1,86 @@
+{
+  "preset": "gpt2-medium",
+  "micro_batch": 8,
+  "rows": [
+    {
+      "config": "fp32 eager",
+      "dtype": "float32",
+      "strategy": "single",
+      "world_size": 1,
+      "params_non_embedding": 353551360,
+      "final_step": 29,
+      "final_loss": 10.980692863464355,
+      "final_val_loss": NaN,
+      "tokens_per_sec": 7619.866733460675,
+      "mfu": 0.05918335680675716,
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "peak_mem_gb": 22.196807384490967,
+      "minutes": 0.5607720891634623
+    },
+    {
+      "config": "bf16 autocast",
+      "dtype": "bfloat16",
+      "strategy": "single",
+      "world_size": 1,
+      "params_non_embedding": 353551360,
+      "final_step": 29,
+      "final_loss": 10.972709655761719,
+      "final_val_loss": NaN,
+      "tokens_per_sec": 54087.31077153574,
+      "mfu": 0.4200948908995496,
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "peak_mem_gb": 16.82280683517456,
+      "minutes": 0.08274431228637695
+    },
+    {
+      "config": "bf16 + torch.compile",
+      "dtype": "bfloat16",
+      "compile": true,
+      "strategy": "single",
+      "world_size": 1,
+      "params_non_embedding": 353551360,
+      "final_step": 29,
+      "final_loss": 10.977106094360352,
+      "final_val_loss": NaN,
+      "tokens_per_sec": 64552.882758124695,
+      "mfu": 0.5013806607959969,
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "peak_mem_gb": 13.850151062011719,
+      "minutes": 0.6615350286165873
+    },
+    {
+      "config": "bf16 + compile + activation ckpt",
+      "dtype": "bfloat16",
+      "compile": true,
+      "activation_checkpointing": true,
+      "strategy": "single",
+      "world_size": 1,
+      "params_non_embedding": 353551360,
+      "final_step": 29,
+      "final_loss": 10.977971076965332,
+      "final_val_loss": NaN,
+      "tokens_per_sec": 55277.888269005925,
+      "mfu": 0.4293421482823985,
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "peak_mem_gb": 7.243194580078125,
+      "minutes": 0.7259803930918376
+    },
+    {
+      "config": "FSDP2 (bf16 mixed precision)",
+      "strategy": "fsdp",
+      "dtype": "bfloat16",
+      "error": [
+        "============================================================"
+      ]
+    },
+    {
+      "config": "FSDP2 + CPU offload",
+      "strategy": "fsdp",
+      "dtype": "bfloat16",
+      "cpu_offload": true,
+      "error": [
+        "============================================================"
+      ]
+    }
+  ]
+}
