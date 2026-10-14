@@ -158,3 +158,5 @@ def test_full_training_loop_runs_distributed_and_resumes(tmp_path, strategy):
     _launch(_train_worker, cfg, init_group=False)
     log = (tmp_path / "run" / "log.jsonl").read_text().splitlines()
     assert len(log) == 8 and '"step": 6' in log[6]
+    # Older checkpoints are pruned: only the newest two remain.
+    assert sorted(d.name for d in (tmp_path / "run" / "checkpoints").glob("step_*")) == ["step_0000005", "step_0000007"]

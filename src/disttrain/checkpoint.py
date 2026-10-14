@@ -12,6 +12,7 @@ The same code path works for single-GPU and DDP models (a world of one shard).
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,20 @@ from disttrain.strategies import unwrap
 
 
 def save(
-    path: str | Path, model: nn.Module, optimizer: Optimizer, step: int, extra: dict[str, Any] | None = None, is_main: bool = True
+    path: str | Path,
+    model: nn.Module,
+    optimizer: Optimizer,
+    step: int,
+    extra: dict[str, Any] | None = None,
+    is_main: bool = True,
+    keep_last: int = 2,
 ) -> None:
     """Write model + optimizer state for ``step`` into ``path/step_<step>/``.
+
+    Only the newest ``keep_last`` checkpoints are kept (0 keeps all), so frequent
+    checkpointing on a preemptible machine doesn't fill the disk. The ``latest``
+    marker is written only after the save completes, so a crash mid-save
+    leaves the previous checkpoint as the one to resume from.
 
     ``get_state_dict`` returns the right flavour of state dict for any wrapper
     (plain, DDP or FSDP2 sharded DTensors), so the caller doesn't need to know
@@ -39,6 +51,9 @@ def save(
         # Small human-readable sidecar file: step and config, so a run can be identified without loading it.
         (target / "meta.json").write_text(json.dumps({"step": step, **(extra or {})}, indent=2))
         (Path(path) / "latest").write_text(target.name)
+        if keep_last:
+            for old in sorted(Path(path).glob("step_*"))[:-keep_last]:
+                shutil.rmtree(old, ignore_errors=True)
 
 
 def latest(path: str | Path) -> Path | None:
