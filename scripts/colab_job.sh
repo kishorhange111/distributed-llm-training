@@ -39,7 +39,12 @@ for job in "$@"; do
     train)
       [ -f data/fineweb/train.bin ] || python scripts/prepare_fineweb.py --tokens 1050000000 --out data/fineweb
       [ -f data/fineweb/train.bin ] || { echo "FAILED: data preparation"; exit 1; }
-      python -m disttrain.train --config configs/gpt2_small_fineweb.yaml 2>&1 | tee results/train_gpt2_small.log
+      # Micro-batch 32 peaks at 21.7 GB, too much for a 24 GB GPU (L4). Below 40 GB, halve it and double
+      # accumulation (same 0.5M-token global batch), and allow more time: an L4 is ~3-4x slower than an A100.
+      mem=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
+      small_gpu=()
+      [ "${mem:-0}" -lt 40000 ] && small_gpu=(--micro_batch_size 16 --grad_accum 32 --time_budget_minutes 330)
+      python -m disttrain.train --config configs/gpt2_small_fineweb.yaml "${small_gpu[@]}" 2>&1 | tee results/train_gpt2_small.log
       # Copy whatever the run produced, even if it stopped early (the log is the result).
       cp runs/gpt2_small_fineweb/{log.jsonl,summary.json,config.json} results/ 2>/dev/null
       python -m disttrain.export runs/gpt2_small_fineweb /content/hf_gpt2_small_fineweb
