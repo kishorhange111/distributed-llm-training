@@ -39,13 +39,19 @@ def run_one(preset: str, micro_batch: int, steps: int, overrides: dict, torchrun
         for k, v in overrides.items():
             args += [f"--{k}", str(v)]
         # FSDP needs a process group, so launch it through torchrun even for one GPU.
-        cmd = ([sys.executable, "-m", "torch.distributed.run", "--nproc_per_node=1"] + args[1:]) if torchrun else [sys.executable] + args
+        cmd = ([sys.executable, "-m", "torch.distributed.run", "--nproc_per_node=1"] + args) if torchrun else [sys.executable] + args
         proc = subprocess.run(cmd, capture_output=True, text=True)
         summary_path = Path(tmp) / "summary.json"
         if proc.returncode == 0 and summary_path.exists():
             return json.loads(summary_path.read_text())
-        err = proc.stderr[-2000:]
-        return {"error": "out of memory" if "OutOfMemoryError" in err or "CUDA out of memory" in err else err.strip().splitlines()[-1:]}
+        err = proc.stderr[-4000:]
+        if "OutOfMemoryError" in err or "CUDA out of memory" in err:
+            return {"error": "out of memory"}
+        # Keep the first line naming the error plus the last few lines, so a failure is diagnosable from the JSON.
+        lines = err.strip().splitlines()
+        first_error = next((ln for ln in lines if "Error" in ln), None)
+        tail = lines[-5:]
+        return {"error": ([first_error] if first_error and first_error not in tail else []) + tail}
 
 
 def main() -> None:
