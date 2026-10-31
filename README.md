@@ -116,20 +116,28 @@ pip install -e ".[dev]"
 pytest
 ```
 
+`make check` runs the same lint and test steps as CI, and `make help` lists the other commands. Optionally, `pip install pre-commit && pre-commit install` runs ruff before every commit.
+
 ## Project layout
 
 ```
-src/disttrain/
-├── model.py         GPT, presets, activation checkpointing
-├── distributed.py   process-group setup from torchrun env vars, seeding, collectives
-├── strategies.py    single / DDP / FSDP2 wrapping, grad clipping for sharded params
-├── data.py          memory-mapped token windows
-├── checkpoint.py    sharded save / load / prune
-├── metrics.py       FLOPs per token, MFU, throughput
-├── train.py         config, LR schedule, training loop
-└── export.py        Hugging Face conversion
-scripts/             FineWeb preparation, benchmark suite, Colab job
-configs/             smoke test, GPT-2 small on FineWeb-Edu
+distributed-llm-training/
+├── src/disttrain/              # the training library (installable package)
+│   ├── model.py                #   GPT, presets, activation checkpointing
+│   ├── distributed.py          #   process-group setup from torchrun env vars, seeding, collectives
+│   ├── strategies.py           #   single / DDP / FSDP2 wrapping, grad clipping for sharded params
+│   ├── data.py                 #   memory-mapped token windows
+│   ├── checkpoint.py           #   sharded save / load / prune
+│   ├── metrics.py              #   FLOPs per token, MFU, throughput
+│   ├── train.py                #   config, LR schedule, training loop (python -m disttrain.train)
+│   └── export.py               #   Hugging Face conversion
+├── configs/                    # smoke test, GPT-2 small on FineWeb-Edu
+├── scripts/                    # FineWeb preparation, benchmark suite, Colab job
+├── results/colab/              # raw benchmark + training logs behind every number above
+├── tests/                      # CPU tests, incl. 2-process DDP / FSDP on the gloo backend
+├── .github/workflows/ci.yml    # lint + tests on every push and pull request
+├── Makefile                    # make install / install-dev / lint / test / smoke / bench
+└── pyproject.toml              # package metadata, dependencies, ruff + pytest config
 ```
 
 ## Limitations

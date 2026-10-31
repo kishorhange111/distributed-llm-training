@@ -8,3 +8,8 @@ results/**/cache.sqlite
 results/smoke*/
 runs/
 data/
+build/
+dist/
+htmlcov/
+.ipynb_checkpoints/
+.env
