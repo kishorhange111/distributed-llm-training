@@ -1,0 +1,32 @@
+name: deepspeed-zero3-gpt2-xl
+model:
+  preset: gpt2-xl
+  block_size: 1024
+  activation_checkpointing: true
+parallel:
+  strategy: deepspeed_zero3
+  micro_batch_size: 2
+  gradient_accumulation_steps: 16
+  reshard_after_forward: true
+  cpu_offload: true
+  zero_stage: 3
+  overlap_comm: true
+  contiguous_gradients: true
+optim:
+  lr: 0.00015
+  min_lr: 0.000015
+  warmup_steps: 500
+  max_steps: 10000
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+precision:
+  dtype: bfloat16
+  grad_scaler: false
+  compile: false
+out_dir: runs/deepspeed_zero3
+seed: 1337
+ckpt_interval: 200
+eval_interval: 500
+log_interval: 10
