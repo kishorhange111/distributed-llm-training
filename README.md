@@ -1,11 +1,11 @@
-# distributed-llm-training: GPT pre-training from one GPU to many
+# distributed-llm-training: Production LLM Pre-Training & Post-Training Stack
 
 [![CI](https://github.com/kishorhange111/distributed-llm-training/actions/workflows/ci.yml/badge.svg)](https://github.com/kishorhange111/distributed-llm-training/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.6%2B-ee4c2c)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-A compact GPT-2-style pre-training stack in plain PyTorch. The same training loop runs on one GPU, with DDP, or with FSDP2 sharding. It handles mixed precision, activation checkpointing, `torch.compile`, gradient accumulation, sharded checkpoints with exact resume, and MFU accounting. The trained model exports to Hugging Face format.
+An end-to-end, production-oriented PyTorch LLM training stack that scales from single-GPU prototyping to multi-node distributed training with **DDP, FSDP2, and DeepSpeed ZeRO-2/ZeRO-3**. Covers the full lifecycle: declarative YAML config validation, packed streaming dataloaders with assistant-only loss masking, **LoRA / QLoRA** adapters, **SFT / DPO / GRPO** post-training objectives, atomic crash-safe checkpointing, analytical GPU memory & **MFU** profiling, **MLflow** experiment tracking with automated post-train eval gates, Hugging Face export, and **Kubernetes PyTorchJob / TorchElastic** manifests.
 
 **Author:** Kishor Hange
 
@@ -55,96 +55,87 @@ What this shows: bf16 autocast is the big win (7× over fp32 on GPT-2 medium, be
 The run was interrupted twice when the Colab runtime was lost. The second time it **resumed on a different GPU type** from the step-800 sharded checkpoint, with a different micro-batch / accumulation split that keeps the same 0.5M-token batch; the loss continues smoothly from where it left off. It was stopped at step 880 because the connection to the runtime kept dropping, so the planned HellaSwag evaluation of the final model was not run.
 <!-- RESULTS:END -->
 
-## What is implemented
-
-| Feature | Where | Notes |
-|---|---|---|
-| GPT-2 architecture, presets tiny → XL (1.5B) | `model.py` | Fused SDPA attention, weight tying, optional activation checkpointing per block |
-| Single / DDP / FSDP2 | `strategies.py` | FSDP2 via `fully_shard` with a bf16 `MixedPrecisionPolicy`, optional CPU offload |
-| Gradient accumulation without wasted all-reduces | `train.py` | `no_sync()` for DDP, `set_requires_gradient_sync(False)` for FSDP2 on all but the last micro-batch |
-| Sharded checkpoints | `checkpoint.py` | `torch.distributed.checkpoint`: every rank writes its own shards; old checkpoints are pruned |
-| Exact resume | `data.py`, `train.py` | Batch *k* depends only on (seed, rank, *k*), so a resumed run sees the same data as an uninterrupted one |
-| Throughput and MFU | `metrics.py` | 6N + attention FLOPs per token, against the GPU's bf16 peak |
-| Data pipeline | `scripts/prepare_fineweb.py` | FineWeb-Edu, GPT-2 tokenizer, memory-mapped `uint16` token files |
-| Hugging Face export | `export.py` | Converts to `GPT2LMHeadModel`; a test checks the logits match |
-
-## How a training step works
+## Architecture & Capabilities
 
 ```mermaid
 flowchart TB
-    D[TokenWindows<br/>memmap uint16] -->|micro-batch k| F[forward + backward<br/>bf16 autocast]
-    F -->|"not last micro-batch: no gradient sync"| D
-    F -->|last micro-batch| S[gradient all-reduce<br/>DDP or FSDP2 reduce-scatter]
-    S --> C[clip grad norm] --> O[AdamW step<br/>warmup + cosine LR]
-    O --> L[log loss, tokens/s, MFU]
-    O -->|every ckpt_interval| K[(DCP sharded checkpoint)]
+    CFG[YAML Job Configs<br/>DDP / FSDP2 / ZeRO-2 / ZeRO-3] --> VAL[Schema & Memory Validator]
+    VAL --> DATA[TokenWindows / PackedStreamingDataset<br/>Assistant-Only Mask + Block-Diagonal Causal Mask]
+    DATA --> MODEL[GPT Transformer + Optional LoRA / QLoRA]
+    MODEL --> STEP[Pre-Train / SFT / DPO / GRPO Step<br/>no_sync Grad Accum + bf16 + torch.compile]
+    STEP --> PROF[ThroughputMeter & TrainingProfiler<br/>Tokens/s, MFU, Phase Latency]
+    STEP --> CKPT[(DCP & Atomic CheckpointManager<br/>SHA-256 + Best/Recency Retention)]
+    STEP --> MLF[Rank-0 MLflowCallback + PostTrainEvalHook<br/>Quality & Throughput Regression Gates]
+    CKPT --> EXP[Hugging Face Export]
 ```
 
-Global batch = micro-batch × accumulation steps × number of GPUs. The GPT-2 small config uses 32 × 16 × 1024 tokens = 0.5M tokens per step, the batch size GPT-3 used for its small models. On N GPUs, set `grad_accum` to 16 / N to keep it.
+| Capability | Module | Highlights |
+|---|---|---|
+| **Modular Configs & Validator** | `config.py`, `configs/*.yaml` | Composable YAML schemas for DDP, FSDP2, DeepSpeed ZeRO-2 & ZeRO-3, invariant checks, DeepSpeed JSON export |
+| **Packed Streaming Data** | `packed_data.py`, `data.py` | Memmap `uint16` windows + sequence packing with position resets, block-diagonal causal mask, assistant-only loss masking |
+| **PEFT (LoRA / QLoRA)** | `lora.py` | Target-module selector (skips `lm_head`), simulated 4-bit/8-bit blockwise QLoRA, zero-init equivalence, lossless merge |
+| **Post-Training Alignment** | `alignment.py` | `SFTStep`, `DPOStep` (implicit reward margin & accuracy), `GRPOStep` (group advantages, PPO clip, k3 KL) |
+| **Parallelism Strategies** | `strategies.py`, `distributed.py` | Single / DDP / FSDP2 (`fully_shard`, bf16 `MixedPrecisionPolicy`, CPU offload), `no_sync()` gradient accumulation |
+| **Fault-Tolerant Checkpointing** | `checkpoint.py`, `checkpoint_manager.py` | DCP sharded save/load + two-phase atomic staging commits, SHA-256 verification, best + recency pruning |
+| **Profiler & MFU Accounting** | `profiler.py`, `metrics.py` | Analytical per-GPU memory estimator across ZeRO stages, 6N + attention FLOPs MFU, phase profiler with JSON export |
+| **MLOps & Eval Gates** | `callbacks.py` | Rank-0 `MLflowCallback` (live client + offline CI fallback) and `PostTrainEvalHook` regression gates |
+| **Kubernetes & Containers** | `Dockerfile`, `deploy/k8s/` | Non-root container image, Kubeflow `PyTorchJob` FSDP manifest, and spot-ready `TorchElastic` (`c10d`) manifest |
+| **Hugging Face Export** | `export.py` | Converts trained weights to `GPT2LMHeadModel` with logit-equivalence tests |
 
 ## Quickstart
 
 ```bash
-pip install -e ".[data]"
-python -m disttrain.train --config configs/smoke.yaml                 # a few steps on random tokens, any device
+pip install -e ".[dev]"
 
-python scripts/prepare_fineweb.py --tokens 1050000000 --out data/fineweb
-python -m disttrain.train --config configs/gpt2_small_fineweb.yaml    # one GPU
+# Run the full CPU test suite (including 2-process gloo DDP & FSDP2 tests)
+pytest
+
+# Smoke test the native training loop on CPU
+python -m disttrain.train --config configs/smoke.yaml
+
+# Multi-GPU FSDP2 launch
 torchrun --nproc_per_node 4 -m disttrain.train --config configs/gpt2_small_fineweb.yaml --strategy fsdp --grad_accum 4
 
-python scripts/benchmark.py --preset gpt2-medium --micro_batch 8      # memory/throughput ablation
-python -m disttrain.export runs/gpt2_small_fineweb out/hf_model       # Hugging Face format
+# Deploy on Kubernetes (Kubeflow Training Operator)
+kubectl apply -f deploy/k8s/pytorchjob-fsdp.yaml
+kubectl apply -f deploy/k8s/torchelastic-job.yaml
 ```
 
-Any config key can be overridden on the command line (`--lr 1e-3 --compile true`). Re-running the same command resumes from the newest checkpoint in `out_dir`.
+## Architecture Decision Records (ADRs)
 
-On Google Colab, `scripts/colab_job.sh bench` and `scripts/colab_job.sh train` run the two experiments. Runtimes can be reclaimed mid-run, so the training config checkpoints every 50 steps, and a run resumes from the newest checkpoint.
+- [ADR 001: Parallelism Strategy Selection (DDP, FSDP2, DeepSpeed ZeRO-2/ZeRO-3)](docs/adr/001-parallelism-and-zero-sharding.md)
+- [ADR 002: Sequence Packing, Assistant-Only Loss Masking, and Post-Training Alignment](docs/adr/002-sequence-packing-and-alignment.md)
+- [ADR 003: Fault-Tolerant Checkpointing, TorchElastic, and Automated Post-Train Eval Gates](docs/adr/003-fault-tolerant-checkpointing-and-mlops.md)
 
-## How correctness is tested
+## Project Layout
 
-Multi-GPU behaviour is tested on CPU: the tests start several processes with the `gloo` backend, the same way `torchrun` would. They check that:
-
-- DDP over 2 ranks gives the same gradients as one process on the combined batch;
-- gradient accumulation with skipped syncs gives the same update as one large batch;
-- FSDP2 training matches unsharded training step for step;
-- the full training loop runs under DDP and FSDP2, checkpoints, resumes at the right step and prunes old checkpoints;
-- indexed data sampling is identical after a resume;
-- the Hugging Face export produces the same logits as the original model.
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-`make check` runs the same lint and test steps as CI, and `make help` lists the other commands. Optionally, `pip install pre-commit && pre-commit install` runs ruff before every commit.
-
-## Project layout
-
-```
+```text
 distributed-llm-training/
-├── src/disttrain/              # the training library (installable package)
-│   ├── model.py                #   GPT, presets, activation checkpointing
-│   ├── distributed.py          #   process-group setup from torchrun env vars, seeding, collectives
-│   ├── strategies.py           #   single / DDP / FSDP2 wrapping, grad clipping for sharded params
-│   ├── data.py                 #   memory-mapped token windows
-│   ├── checkpoint.py           #   sharded save / load / prune
-│   ├── metrics.py              #   FLOPs per token, MFU, throughput
-│   ├── train.py                #   config, LR schedule, training loop (python -m disttrain.train)
-│   └── export.py               #   Hugging Face conversion
-├── configs/                    # smoke test, GPT-2 small on FineWeb-Edu
+├── src/disttrain/
+│   ├── model.py                # GPT-2 transformer, presets (tiny -> XL), activation checkpointing
+│   ├── config.py               # Modular DDP / FSDP2 / DeepSpeed ZeRO-2 & ZeRO-3 YAML schemas & validator
+│   ├── distributed.py          # Process-group setup, rank seeding, collectives
+│   ├── strategies.py           # Single / DDP / FSDP2 wrapping, global grad-norm clipping
+│   ├── data.py                 # Memory-mapped uint16 token windows with resume-exact indexing
+│   ├── packed_data.py          # Packed streaming dataloader, assistant-only masking, block-diagonal mask
+│   ├── lora.py                 # LoRA & simulated 4-bit/8-bit QLoRA adapters, target selector, merge
+│   ├── alignment.py            # SFT, DPO, and GRPO losses & trainer step abstractions
+│   ├── checkpoint.py           # Sharded DCP save / load / prune
+│   ├── checkpoint_manager.py   # Atomic staging checkpoints, SHA-256 verification, best+recency retention
+│   ├── metrics.py              # FLOPs/token, MFU, ThroughputMeter
+│   ├── profiler.py             # Analytical GPU memory estimator & phase-level TrainingProfiler
+│   ├── callbacks.py            # Rank-0 MLflowCallback & automated PostTrainEvalHook
+│   ├── train.py                # Unified training loop (python -m disttrain.train)
+│   └── export.py               # Hugging Face GPT2LMHeadModel conversion
+├── configs/                    # Smoke, FineWeb-Edu, DDP, FSDP ZeRO-3, DeepSpeed ZeRO-2/3 YAML configs
+├── deploy/k8s/                 # Kubeflow PyTorchJob & TorchElastic manifests
+├── docs/adr/                   # Training systems Architecture Decision Records
 ├── scripts/                    # FineWeb preparation, benchmark suite, Colab job
-├── results/colab/              # raw benchmark + training logs behind every number above
-├── tests/                      # CPU tests, incl. 2-process DDP / FSDP on the gloo backend
-├── .github/workflows/ci.yml    # lint + tests on every push and pull request
-├── Makefile                    # make install / install-dev / lint / test / smoke / bench
-└── pyproject.toml              # package metadata, dependencies, ruff + pytest config
+├── results/colab/              # Raw A100/L4 benchmark & pre-training logs
+├── tests/                      # 100% CPU-runnable unit, multi-process gloo, and manifest tests
+├── Dockerfile                  # Non-root container image for torchrun / Kubeflow jobs
+└── .github/workflows/ci.yml    # Ruff lint/format + pytest CI
 ```
-
-## Limitations
-
-- Colab provides one GPU per runtime, so the multi-GPU code paths are verified by the multi-process CPU tests, not by multi-GPU timing runs. The FSDP2 code path is therefore tested for correctness, not timed.
-- No tensor or pipeline parallelism; FSDP2 alone covers models up to a few billion parameters.
-- The data loader samples random windows (with replacement), as nanoGPT does, rather than making exact epochs.
 
 ## License
 
