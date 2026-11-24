@@ -1,0 +1,30 @@
+name: fsdp-zero3-gpt2-xl
+model:
+  preset: gpt2-xl
+  block_size: 1024
+  activation_checkpointing: true
+parallel:
+  strategy: fsdp
+  micro_batch_size: 4
+  gradient_accumulation_steps: 8
+  reshard_after_forward: true
+  cpu_offload: false
+  zero_stage: 3
+optim:
+  lr: 0.0002
+  min_lr: 0.00002
+  warmup_steps: 500
+  max_steps: 10000
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+precision:
+  dtype: bfloat16
+  grad_scaler: false
+  compile: false
+out_dir: runs/fsdp_zero3_gpt2_xl
+seed: 1337
+ckpt_interval: 200
+eval_interval: 500
+log_interval: 10

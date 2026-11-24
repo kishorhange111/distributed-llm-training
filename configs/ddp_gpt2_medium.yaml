@@ -1,0 +1,30 @@
+name: ddp-gpt2-medium
+model:
+  preset: gpt2-medium
+  block_size: 1024
+  activation_checkpointing: false
+parallel:
+  strategy: ddp
+  micro_batch_size: 8
+  gradient_accumulation_steps: 4
+  reshard_after_forward: false
+  cpu_offload: false
+  zero_stage: 0
+optim:
+  lr: 0.0003
+  min_lr: 0.00003
+  warmup_steps: 200
+  max_steps: 5000
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+precision:
+  dtype: bfloat16
+  grad_scaler: false
+  compile: true
+out_dir: runs/ddp_gpt2_medium
+seed: 1337
+ckpt_interval: 250
+eval_interval: 250
+log_interval: 10
